@@ -120,12 +120,12 @@
   <!-- ── SETUP ROW ── -->
   <div class="panel setup">
     <div class="setup-group" style="min-width:300px">
-      <label>JWT Token (paste after login from API Dog)</label>
+      <label>JWT Token (paste after login from Scalar / API client)</label>
       <textarea id="jwtToken" placeholder="eyJhbGciOi..." rows="2"></textarea>
     </div>
-    <div class="setup-group" style="max-width:180px">
+    <div class="setup-group" style="max-width:420px">
       <label>Server URL</label>
-      <input id="serverUrl" value="http://localhost:5000" />
+      <input id="serverUrl" value="https://connecto-fvfuauetc7buamaz.westeurope-01.azurewebsites.net" />
     </div>
     <div class="setup-group" style="max-width:220px">
       <label>&nbsp;</label>
@@ -209,7 +209,7 @@ let autoTypingTimer = null;
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function token()  { return document.getElementById('jwtToken').value.trim(); }
-function server() { return document.getElementById('serverUrl').value.trim(); }
+function server() { return document.getElementById('serverUrl').value.trim().replace(/\/$/, ''); }
 function convId() { return document.getElementById('conversationId').value.trim(); }
 
 function log(logId, msg, type = 'info') {
@@ -379,9 +379,9 @@ async function sendMessage() {
   if (!id || !text) { log('chatLog', '❌ Need conversation ID and message text', 'error'); return; }
   log('chatLog', `▶ Sending: "${text}"`, 'sent');
   try {
-    const r = await api('POST', '/api/message', {
+    const r = await api('POST', '/api/Message', {
       conversationId: id,
-      contentType: 0,       // 0 = Text
+      contentType: 0,
       textContent: text
     });
     if (r.id) {
@@ -399,7 +399,7 @@ async function markAsRead() {
   const msgId = document.getElementById('messageId').value.trim();
   if (!id || !msgId) { log('chatLog', '❌ Need conversation ID and message ID', 'error'); return; }
   try {
-    const r = await api('POST', '/api/message/read', {
+    const r = await api('POST', '/api/Message/read', {
       conversationId: id,
       upToMessageId: msgId
     });
@@ -412,8 +412,7 @@ async function createDm() {
   if (!targetId) { log('notifLog', '❌ Paste target user ID', 'error'); return; }
   log('notifLog', `Creating DM with ${targetId}...`, 'sent');
   try {
-    // your endpoint takes a raw Guid body
-    const r = await api('POST', '/api/conversation/dm', targetId);
+    const r = await api('POST', '/api/Conversation/dm', targetId);
     if (r.id) {
       log('notifLog', `✅ DM created | id=${r.id}`, 'success');
       document.getElementById('conversationId').value = r.id;
