@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ConnectO — Real-Time Feature Tester</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; }
+
+    header {
+      background: #1a1a2e;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid #2d2d4e;
+    }
+    header h1 { font-size: 1.2rem; color: #7c83fd; }
+    header span { font-size: 0.8rem; color: #666; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto 1fr;
+      gap: 12px;
+      padding: 16px;
+      height: calc(100vh - 60px);
+    }
+
+    .panel {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: hidden;
+    }
+    .panel h2 { font-size: 0.85rem; text-transform: uppercase; color: #7c83fd; letter-spacing: 1px; }
+
+    .panel.setup { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; gap: 16px; }
+    .setup-group { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 200px; }
+    .setup-group label { font-size: 0.75rem; color: #888; }
+
+    input, textarea, select {
+      background: #111;
+      border: 1px solid #333;
+      color: #e0e0e0;
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-size: 0.85rem;
+      width: 100%;
+      outline: none;
+    }
+    input:focus, textarea:focus { border-color: #7c83fd; }
+    textarea { resize: vertical; min-height: 36px; }
+
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 600;
+      transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.85; }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    .btn-primary { background: #7c83fd; color: #fff; }
+    .btn-success { background: #2ecc71; color: #000; }
+    .btn-danger  { background: #e74c3c; color: #fff; }
+    .btn-warn    { background: #f39c12; color: #000; }
+    .btn-neutral { background: #333; color: #ddd; }
+
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .log {
+      flex: 1;
+      overflow-y: auto;
+      font-size: 0.78rem;
+      font-family: 'Courier New', monospace;
+      background: #111;
+      border: 1px solid #222;
+      border-radius: 6px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .log-entry { padding: 4px 6px; border-radius: 4px; line-height: 1.4; }
+    .log-entry.info    { color: #aaa; }
+    .log-entry.success { color: #2ecc71; background: #0d2b1a; }
+    .log-entry.error   { color: #e74c3c; background: #2b0d0d; }
+    .log-entry.event   { color: #7c83fd; background: #0d0d2b; }
+    .log-entry.sent    { color: #f39c12; background: #2b1d0d; }
+
+    .status-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #e74c3c;
+    }
+    .status-dot.connected { background: #2ecc71; }
+    .conn-status { font-size: 0.78rem; display: flex; align-items: center; gap: 8px; color: #888; }
+    .typing-indicator { font-size: 0.78rem; color: #7c83fd; min-height: 18px; font-style: italic; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>💡 ConnectO Real-Time Tester</h1>
+  <span>Open in TWO browser tabs — one per user</span>
+</header>
+
+<div class="layout">
+
+  <!-- ── SETUP ROW ── -->
+  <div class="panel setup">
+    <div class="setup-group" style="min-width:300px">
+      <label>JWT Token (paste after login from API Dog)</label>
+      <textarea id="jwtToken" placeholder="eyJhbGciOi..." rows="2"></textarea>
+    </div>
+    <div class="setup-group" style="max-width:180px">
+      <label>Server URL</label>
+      <input id="serverUrl" value="http://localhost:5000" />
+    </div>
+    <div class="setup-group" style="max-width:220px">
+      <label>&nbsp;</label>
+      <button class="btn-primary" onclick="connectHubs()">🔗 Connect to Both Hubs</button>
+      <button class="btn-danger" onclick="disconnectHubs()" style="margin-top:6px">⛔ Disconnect All</button>
+    </div>
+    <div class="setup-group" style="max-width:260px">
+      <label>Hub Status</label>
+      <div class="conn-status">
+        <span class="status-dot" id="chatDot"></span> ChatHub
+        &nbsp;&nbsp;
+        <span class="status-dot" id="notifDot"></span> NotificationHub
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LEFT: CHAT HUB ── -->
+  <div class="panel">
+    <h2>💬 ChatHub — Messages & Typing</h2>
+
+    <div>
+      <label style="font-size:0.75rem;color:#888">Conversation ID (auto-fills on NewConversation event)</label>
+      <input id="conversationId" placeholder="paste or auto-filled conversation GUID" />
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-success" onclick="joinConversation()">↩ Join Conversation</button>
+      <button class="btn-neutral" onclick="leaveConversation()">↪ Leave Conversation</button>
+    </div>
+
+    <div>
+      <label style="font-size:0.75rem;color:#888">Message (auto-sends typing indicator while you type)</label>
+      <input id="messageText"
+             placeholder="Type here — typing indicator fires automatically"
+             oninput="onTypingInput()"
+             onblur="sendTypingIndicator(false)" />
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-primary" onclick="sendMessage()">▶ Send Message</button>
+      <button class="btn-warn"    onclick="sendTypingIndicator(true)">✏ Typing: ON</button>
+      <button class="btn-neutral" onclick="sendTypingIndicator(false)">✏ Typing: OFF</button>
+    </div>
+
+    <div>
+      <label style="font-size:0.75rem;color:#888">Message ID (auto-fills on MessageReceived)</label>
+      <input id="messageId" placeholder="paste or auto-filled message GUID" />
+      <button class="btn-neutral" style="margin-top:6px;width:100%" onclick="markAsRead()">✔ Mark as Read</button>
+    </div>
+
+    <div class="typing-indicator" id="typingIndicator"></div>
+
+    <div class="log" id="chatLog"></div>
+  </div>
+
+  <!-- ── RIGHT: NOTIFICATION HUB ── -->
+  <div class="panel">
+    <h2>🔔 NotificationHub — All Notification Events</h2>
+
+    <div>
+      <label style="font-size:0.75rem;color:#888">Target User ID (for Create DM)</label>
+      <input id="targetUserId" placeholder="paste the other user's GUID" />
+      <button class="btn-success" style="margin-top:6px;width:100%" onclick="createDm()">+ Create DM Conversation</button>
+    </div>
+
+    <div style="font-size:0.72rem;color:#555;padding:4px 0">
+      All 6 notification events are shown below automatically when received:
+      NewConversation · NewGroupConversation · GroupUpdated · RemovedFromGroup · RoleChanged · GroupDeleted
+    </div>
+
+    <div class="log" id="notifLog"></div>
+  </div>
+
+</div>
+
+<script>
+let chatConn  = null;
+let notifConn = null;
+let autoTypingTimer = null;
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+function token()  { return document.getElementById('jwtToken').value.trim(); }
+function server() { return document.getElementById('serverUrl').value.trim(); }
+function convId() { return document.getElementById('conversationId').value.trim(); }
+
+function log(logId, msg, type = 'info') {
+  const el    = document.getElementById(logId);
+  const entry = document.createElement('div');
+  entry.className  = `log-entry ${type}`;
+  entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  el.appendChild(entry);
+  el.scrollTop = el.scrollHeight;
+}
+
+function dot(id, on) {
+  document.getElementById(id).className = 'status-dot' + (on ? ' connected' : '');
+}
+
+// ── hub connection ────────────────────────────────────────────────────────────
+
+async function connectHubs() {
+  if (!token()) { alert('Paste your JWT token first'); return; }
+
+  // ── ChatHub ──
+  chatConn = new signalR.HubConnectionBuilder()
+    .withUrl(`${server()}/hubs/chat`, { accessTokenFactory: () => token() })
+    .withAutomaticReconnect()
+    .configureLogging(signalR.LogLevel.Warning)
+    .build();
+
+  chatConn.on('MessageReceived', (msg) => {
+    log('chatLog', `📨 MessageReceived | id=${msg.id} | "${msg.textContent ?? '[media]'}" | from=${msg.senderId}`, 'event');
+    document.getElementById('messageId').value = msg.id ?? '';
+  });
+
+  chatConn.on('ReadReceipt', (readerId, messageIds) => {
+    log('chatLog', `✅ ReadReceipt | reader=${readerId} | ${messageIds.length} message(s)`, 'success');
+  });
+
+  chatConn.on('ReceiveTypingIndicator', (userId, convId, isTyping) => {
+    const el = document.getElementById('typingIndicator');
+    if (isTyping) {
+      el.textContent = `✏️ ${userId.substring(0, 8)}... is typing`;
+      clearTimeout(autoTypingTimer);
+      autoTypingTimer = setTimeout(() => { el.textContent = ''; }, 3000);
+    } else {
+      el.textContent = '';
+    }
+    log('chatLog', `✏️ TypingIndicator | user=${userId.substring(0,8)}... | typing=${isTyping}`, 'info');
+  });
+
+  chatConn.onreconnecting(() => { dot('chatDot', false); log('chatLog', 'Reconnecting...', 'info'); });
+  chatConn.onreconnected(() =>  { dot('chatDot', true);  log('chatLog', 'Reconnected ✅', 'success'); });
+  chatConn.onclose((e) =>       { dot('chatDot', false); log('chatLog', `Disconnected: ${e?.message ?? ''}`, 'error'); });
+
+  try {
+    await chatConn.start();
+    dot('chatDot', true);
+    log('chatLog', `✅ Connected to ChatHub → ${server()}/hubs/chat`, 'success');
+  } catch (e) {
+    log('chatLog', `❌ ChatHub failed: ${e.message}`, 'error');
+  }
+
+  // ── NotificationHub ──
+  notifConn = new signalR.HubConnectionBuilder()
+    .withUrl(`${server()}/hubs/notifications`, { accessTokenFactory: () => token() })
+    .withAutomaticReconnect()
+    .configureLogging(signalR.LogLevel.Warning)
+    .build();
+
+  notifConn.on('NewConversation', (conv) => {
+    log('notifLog', `👤 NewConversation | name="${conv.name ?? 'DM'}" | id=${conv.id}`, 'event');
+    document.getElementById('conversationId').value = conv.id ?? '';
+  });
+
+  notifConn.on('NewGroupConversation', (conv) => {
+    log('notifLog', `👥 NewGroupConversation | name="${conv.name}" | id=${conv.id}`, 'event');
+    document.getElementById('conversationId').value = conv.id ?? '';
+  });
+
+  notifConn.on('GroupUpdated', (conv) => {
+    log('notifLog', `✏️ GroupUpdated | name="${conv.name}" | id=${conv.id}`, 'event');
+  });
+
+  notifConn.on('RemovedFromGroup', (convId) => {
+    log('notifLog', `⛔ RemovedFromGroup | conversationId=${convId}`, 'error');
+  });
+
+  notifConn.on('RoleChanged', (convId, newRole) => {
+    log('notifLog', `🔑 RoleChanged | conversationId=${convId} | newRole=${newRole}`, 'event');
+  });
+
+  notifConn.on('GroupDeleted', (convId) => {
+    log('notifLog', `🗑️ GroupDeleted | conversationId=${convId}`, 'error');
+  });
+
+  notifConn.onclose((e) => { dot('notifDot', false); log('notifLog', `Disconnected: ${e?.message ?? ''}`, 'error'); });
+
+  try {
+    await notifConn.start();
+    dot('notifDot', true);
+    log('notifLog', `✅ Connected to NotificationHub → ${server()}/hubs/notifications`, 'success');
+  } catch (e) {
+    log('notifLog', `❌ NotificationHub failed: ${e.message}`, 'error');
+  }
+}
+
+async function disconnectHubs() {
+  if (chatConn)  { await chatConn.stop();  chatConn  = null; }
+  if (notifConn) { await notifConn.stop(); notifConn = null; }
+  dot('chatDot', false);
+  dot('notifDot', false);
+}
+
+// ── hub method calls ──────────────────────────────────────────────────────────
+
+async function joinConversation() {
+  if (!chatConn) { log('chatLog', '❌ Not connected to ChatHub', 'error'); return; }
+  const id = convId();
+  if (!id) { log('chatLog', '❌ Paste a conversation ID', 'error'); return; }
+  try {
+    await chatConn.invoke('JoinConversation', id);
+    log('chatLog', `↩ Joined group: ${id}`, 'success');
+  } catch (e) { log('chatLog', `❌ JoinConversation: ${e.message}`, 'error'); }
+}
+
+async function leaveConversation() {
+  if (!chatConn) return;
+  const id = convId();
+  try {
+    await chatConn.invoke('LeaveConversation', id);
+    log('chatLog', `↪ Left group: ${id}`, 'info');
+  } catch (e) { log('chatLog', `❌ LeaveConversation: ${e.message}`, 'error'); }
+}
+
+async function sendTypingIndicator(isTyping) {
+  if (!chatConn) return;
+  const id = convId();
+  if (!id) return;
+  try {
+    await chatConn.invoke('SendTypingIndicator', id, isTyping);
+    log('chatLog', `✏️ SendTypingIndicator → typing=${isTyping}`, 'sent');
+  } catch (e) { log('chatLog', `❌ TypingIndicator: ${e.message}`, 'error'); }
+}
+
+let typingDebounce = null;
+function onTypingInput() {
+  sendTypingIndicator(true);
+  clearTimeout(typingDebounce);
+  typingDebounce = setTimeout(() => sendTypingIndicator(false), 2000);
+}
+
+// ── REST calls ────────────────────────────────────────────────────────────────
+
+async function api(method, path, body) {
+  const res = await fetch(server() + path, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token()}`
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined
+  });
+  return res.json();
+}
+
+async function sendMessage() {
+  const id   = convId();
+  const text = document.getElementById('messageText').value.trim();
+  if (!id || !text) { log('chatLog', '❌ Need conversation ID and message text', 'error'); return; }
+  log('chatLog', `▶ Sending: "${text}"`, 'sent');
+  try {
+    const r = await api('POST', '/api/message', {
+      conversationId: id,
+      contentType: 0,       // 0 = Text
+      textContent: text
+    });
+    if (r.id) {
+      log('chatLog', `✅ Message sent | id=${r.id}`, 'success');
+      document.getElementById('messageId').value = r.id;
+      document.getElementById('messageText').value = '';
+    } else {
+      log('chatLog', `❌ Send failed: ${JSON.stringify(r)}`, 'error');
+    }
+  } catch (e) { log('chatLog', `❌ ${e.message}`, 'error'); }
+}
+
+async function markAsRead() {
+  const id    = convId();
+  const msgId = document.getElementById('messageId').value.trim();
+  if (!id || !msgId) { log('chatLog', '❌ Need conversation ID and message ID', 'error'); return; }
+  try {
+    const r = await api('POST', '/api/message/read', {
+      conversationId: id,
+      upToMessageId: msgId
+    });
+    log('chatLog', `✅ MarkAsRead | newly read: ${r.newlyMessageIds?.length ?? 0}`, 'success');
+  } catch (e) { log('chatLog', `❌ ${e.message}`, 'error'); }
+}
+
+async function createDm() {
+  const targetId = document.getElementById('targetUserId').value.trim();
+  if (!targetId) { log('notifLog', '❌ Paste target user ID', 'error'); return; }
+  log('notifLog', `Creating DM with ${targetId}...`, 'sent');
+  try {
+    // your endpoint takes a raw Guid body
+    const r = await api('POST', '/api/conversation/dm', targetId);
+    if (r.id) {
+      log('notifLog', `✅ DM created | id=${r.id}`, 'success');
+      document.getElementById('conversationId').value = r.id;
+    } else {
+      log('notifLog', `❌ ${JSON.stringify(r)}`, 'error');
+    }
+  } catch (e) { log('notifLog', `❌ ${e.message}`, 'error'); }
+}
+</script>
+</body>
+</html>
